@@ -18,7 +18,7 @@ $hashtag = 'hashtag_suche';
 $cleanupDays = 30; 
 
 // Pfad zur JSON-Datei, in der geboostete IDs gespeichert werden
-$jsonFile = 'posted_ids.json';
+$jsonFile = __DIR__ . '/posted_ids.json';
 
 // ----------------------------------------------------
 // Funktionen
@@ -26,6 +26,7 @@ $jsonFile = 'posted_ids.json';
 
 /**
  * Holt die IDs der bereits geboosteten Beiträge aus der JSON-Datei.
+ * @param string $jsonFile
  * @return array
  */
 function getPostedIds($jsonFile) {
@@ -43,7 +44,7 @@ function getPostedIds($jsonFile) {
  */
 function addPostedId($jsonFile, $statusId) {
     $ids = getPostedIds($jsonFile);
-    $ids[$statusId] = time(); // Speichert die ID mit dem aktuellen Timestamp
+    $ids[$statusId] = time();
     file_put_contents($jsonFile, json_encode($ids, JSON_PRETTY_PRINT));
 }
 
@@ -89,12 +90,17 @@ function callApi($url, $accessToken, $method = 'GET') {
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($httpCode !== 200) {
+    if ($httpCode === 200) {
+        $data = json_decode($response, true);
+        if ($data === null && !empty($response)) {
+            error_log("JSON-Decodierungsfehler: " . json_last_error_msg());
+            return false;
+        }
+        return $data;
+    } else {
         error_log("Fehler bei API-Anfrage ($httpCode): " . $response);
         return false;
     }
-    
-    return json_decode($response, true);
 }
 
 // ----------------------------------------------------
@@ -103,34 +109,34 @@ function callApi($url, $accessToken, $method = 'GET') {
 
 echo "Starte Mastodon-Bot-Lauf...\n";
 
-// 1. Hole alle geboosteten IDs aus der JSON-Datei
-$postedIds = getPostedIds($jsonFile);
-echo "Es gibt " . count($postedIds) . " IDs, die bereits geboostet wurden.\n";
+// 1. Hole die Hashtag-Timeline
+$timelineUrl = "https://$instance/api/v1/timelines/tag/$hashtag?limit=40";
+$timelineResult = callApi($timelineUrl, $accessToken);
 
-// 2. Suche nach Beiträgen mit dem Hashtag
-$searchUrl = "https://$instance/api/v2/search?q=%23$hashtag&type=hashtags&resolve=true";
-$searchResults = callApi($searchUrl, $accessToken);
-
-if (!$searchResults || !isset($searchResults['statuses'])) {
-    echo "Keine Ergebnisse oder Fehler bei der Suche.\n";
-    cleanupPostedIds($jsonFile, $cleanupDays);
+if ($timelineResult === false || count($timelineResult) === 0) {
+    echo "Keine Ergebnisse gefunden oder API-Fehler.\n";
+    if (!file_exists($jsonFile)) {
+        file_put_contents($jsonFile, json_encode([]));
+    }
     die();
 }
 
-$statuses = $searchResults['statuses'];
+// 2. Kehre die Reihenfolge der Beiträge um, um die neuesten zuerst zu boosten
+$statuses = array_reverse($timelineResult);
 
-// 3. Verarbeite die gefundenen Beiträge
+// 3. Hole alle geboosteten IDs aus der JSON-Datei
+$postedIds = getPostedIds($jsonFile);
+echo "Es gibt " . count($postedIds) . " IDs, die bereits geboostet wurden.\n";
+
+// 4. Verarbeite die gefundenen Beiträge
 foreach ($statuses as $status) {
     $statusId = $status['id'];
 
-    // Prüfe, ob es ein originaler Beitrag ist und keine Reblog (Boost)
-    // Ein Reblog hat einen 'reblog'-Schlüssel. Wir wollen nur Originale.
-    if ($status['reblog'] !== null) {
+    if (isset($status['reblog']) && $status['reblog'] !== null) {
         echo "Beitrag ID $statusId ist ein Reblog und wird ignoriert.\n";
         continue;
     }
     
-    // Prüfe, ob die ID bereits in unserer Liste ist
     if (isset($postedIds[$statusId])) {
         echo "Beitrag ID $statusId wurde bereits geboostet und wird ignoriert.\n";
         continue;
@@ -148,7 +154,7 @@ foreach ($statuses as $status) {
     }
 }
 
-// 4. Bereinige die JSON-Datei von alten Einträgen
+// 5. Bereinige die JSON-Datei von alten Einträgen
 cleanupPostedIds($jsonFile, $cleanupDays);
 
 echo "Bot-Lauf abgeschlossen.\n";
