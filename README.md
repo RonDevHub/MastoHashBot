@@ -1,2 +1,2 @@
-# MastoHashBot
+# :robot: MastoHashBot
 
