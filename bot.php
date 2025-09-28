@@ -1,31 +1,31 @@
 <?php
 
 // ----------------------------------------------------
-// Konfiguration
+// Configuration
 // ----------------------------------------------------
 
-// Dein Mastodon-Access-Token (von den Einstellungen > Entwicklung)
-$accessToken = 'DEIN_ACCESS_TOKEN_HIER_EINFUEGEN'; 
+// Your Mastodon access token (from Settings > Development)
+$accessToken = 'INSERT_YOUR_ACCESS_TOKEN_HERE'; 
 
-// Deine Mastodon-Instanz (z.B. mastodon.social)
-$instance = 'DEINE_INSTANZ_HIER.de';
+// Your Mastodon instance (e.g. mastodon.social)
+$instance = 'YOUR_INSTANCE_HERE.de';
 
-// Der Hashtag, nach dem gesucht werden soll
-$hashtag = 'hashtag_suche';
+// The hashtag or hashtags to search for
+$hashtags = ['hashtag1', 'hashtag2', '...'];
 
-// Nach wie vielen Tagen soll eine ID aus der JSON-Datei gelöscht werden?
-// (Damit die Datei nicht zu groß wird)
+// After how many days should an ID be deleted from the JSON file?
+// (Prevents the file from getting too large)
 $cleanupDays = 30; 
 
-// Pfad zur JSON-Datei, in der geboostete IDs gespeichert werden
+// Path to the JSON file where boosted IDs are stored
 $jsonFile = __DIR__ . '/posted_ids.json';
 
 // ----------------------------------------------------
-// Funktionen
+// Functions
 // ----------------------------------------------------
 
 /**
- * Holt die IDs der bereits geboosteten Beiträge aus der JSON-Datei.
+ * Retrieves the IDs of already boosted posts from the JSON file.
  * @param string $jsonFile
  * @return array
  */
@@ -38,7 +38,7 @@ function getPostedIds($jsonFile) {
 }
 
 /**
- * Speichert die ID eines neuen geboosteten Beitrags in der JSON-Datei.
+ * Stores the ID of a newly boosted post in the JSON file.
  * @param string $jsonFile
  * @param int $statusId
  */
@@ -49,7 +49,7 @@ function addPostedId($jsonFile, $statusId) {
 }
 
 /**
- * Entfernt alte Einträge aus der JSON-Datei.
+ * Removes old entries from the JSON file.
  * @param string $jsonFile
  * @param int $cleanupDays
  */
@@ -66,12 +66,12 @@ function cleanupPostedIds($jsonFile, $cleanupDays) {
 
     if (count($ids) !== count($newIds)) {
         file_put_contents($jsonFile, json_encode($newIds, JSON_PRETTY_PRINT));
-        echo "Alte IDs aus $jsonFile gelöscht.\n";
+        echo "Old IDs deleted from $jsonFile.\n";
     }
 }
 
 /**
- * Führt eine API-Anfrage an Mastodon durch.
+ * Executes an API request to Mastodon.
  * @param string $url
  * @param string $accessToken
  * @param string $method
@@ -93,70 +93,71 @@ function callApi($url, $accessToken, $method = 'GET') {
     if ($httpCode === 200) {
         $data = json_decode($response, true);
         if ($data === null && !empty($response)) {
-            error_log("JSON-Decodierungsfehler: " . json_last_error_msg());
+            error_log("JSON decode error: " . json_last_error_msg());
             return false;
         }
         return $data;
     } else {
-        error_log("Fehler bei API-Anfrage ($httpCode): " . $response);
+        error_log("API request error ($httpCode): " . $response);
         return false;
     }
 }
 
 // ----------------------------------------------------
-// Hauptlogik des Bots
+// Main bot logic (adapted for multiple hashtags)
 // ----------------------------------------------------
 
-echo "Starte Mastodon-Bot-Lauf...\n";
+echo "Starting Mastodon bot run...\n";
 
-// 1. Hole die Hashtag-Timeline
-$timelineUrl = "https://$instance/api/v1/timelines/tag/$hashtag?limit=40";
-$timelineResult = callApi($timelineUrl, $accessToken);
-
-if ($timelineResult === false || count($timelineResult) === 0) {
-    echo "Keine Ergebnisse gefunden oder API-Fehler.\n";
-    if (!file_exists($jsonFile)) {
-        file_put_contents($jsonFile, json_encode([]));
-    }
-    die();
-}
-
-// 2. Kehre die Reihenfolge der Beiträge um, um die neuesten zuerst zu boosten
-$statuses = array_reverse($timelineResult);
-
-// 3. Hole alle geboosteten IDs aus der JSON-Datei
+// 1. Retrieve all boosted IDs from the JSON file
 $postedIds = getPostedIds($jsonFile);
-echo "Es gibt " . count($postedIds) . " IDs, die bereits geboostet wurden.\n";
+echo "There are " . count($postedIds) . " IDs that have already been boosted.\n";
 
-// 4. Verarbeite die gefundenen Beiträge
-foreach ($statuses as $status) {
-    $statusId = $status['id'];
+foreach ($hashtags as $hashtag) {
+    echo "Searching for posts with hashtag #$hashtag...\n";
 
-    if (isset($status['reblog']) && $status['reblog'] !== null) {
-        echo "Beitrag ID $statusId ist ein Reblog und wird ignoriert.\n";
-        continue;
-    }
-    
-    if (isset($postedIds[$statusId])) {
-        echo "Beitrag ID $statusId wurde bereits geboostet und wird ignoriert.\n";
-        continue;
+    // Fetch the hashtag timeline
+    $timelineUrl = "https://$instance/api/v1/timelines/tag/$hashtag?limit=40";
+    $timelineResult = callApi($timelineUrl, $accessToken);
+
+    if ($timelineResult === false || count($timelineResult) === 0) {
+        echo "No results found or API error for #$hashtag.\n";
+        continue; // Skip to next hashtag
     }
 
-    // Wenn der Beitrag neu und ein Original ist, booste ihn
-    $boostUrl = "https://$instance/api/v1/statuses/$statusId/reblog";
-    $boostResult = callApi($boostUrl, $accessToken, 'POST');
+    // Reverse the order of posts to boost newest ones first
+    $statuses = array_reverse($timelineResult);
 
-    if ($boostResult) {
-        echo "Beitrag ID $statusId erfolgreich geboostet!\n";
-        addPostedId($jsonFile, $statusId);
-    } else {
-        echo "Fehler beim Boosten von Beitrag ID $statusId.\n";
+    // 2. Process the found posts
+    foreach ($statuses as $status) {
+        $statusId = $status['id'];
+
+        if (isset($status['reblog']) && $status['reblog'] !== null) {
+            echo "Post ID $statusId is a reblog and will be ignored.\n";
+            continue;
+        }
+
+        if (isset($postedIds[$statusId])) {
+            echo "Post ID $statusId has already been boosted and will be ignored.\n";
+            continue;
+        }
+
+        // Boost the post
+        $boostUrl = "https://$instance/api/v1/statuses/$statusId/reblog";
+        $boostResult = callApi($boostUrl, $accessToken, 'POST');
+
+        if ($boostResult) {
+            echo "Post ID $statusId boosted successfully!\n";
+            addPostedId($jsonFile, $statusId);
+        } else {
+            echo "Error boosting post ID $statusId.\n";
+        }
     }
 }
 
-// 5. Bereinige die JSON-Datei von alten Einträgen
+// 3. Clean up old entries from the JSON file
 cleanupPostedIds($jsonFile, $cleanupDays);
 
-echo "Bot-Lauf abgeschlossen.\n";
+echo "Bot run completed.\n";
 
 ?>
