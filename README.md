@@ -85,7 +85,10 @@ Bot run completed.
 
 The bot stores boosted post IDs in a JSON file (`posted_ids.json`).
 To prevent the file from growing indefinitely, entries older than `$cleanupDays` are automatically removed.
-###🤝 Usage in Production
+
+---
+
+### 🤝 Usage in Production
 
 - Run the bot regularly via cronjob or a systemd timer, for example:
 ```
