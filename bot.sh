@@ -2,8 +2,9 @@
 
 # Configuration
 ACCESS_TOKEN="YOUR TOKEN"
-INSTANCE="YOUR MASTODON INSTANZ"  # Your Mastodon instance without https://
-HASHTAGS="hashtag1 haschtag2 ..."  # Add all hashtags here separated by spaces
+INSTANCE="YOUR MASTODON INSTANZ"      # Your Mastodon instance without https://
+HASHTAGS="hashtag1 haschtag2 ..."      # Add all hashtags here separated by spaces
+DISABLED_HASHTAGS=""                   # Hashtags that prevent boosting (without #), separated by spaces
 JSON_FILE="posted_ids.json"
 CLEANUP_DAYS=30
 
@@ -87,6 +88,24 @@ for HASHTAG in $HASHTAGS; do
         if echo "$POSTED_IDS" | grep -q "$status_id"; then
             echo "Post $status_id has already been boosted, ignoring."
             continue
+        fi
+
+        # Check for disabled hashtags in the status (only if DISABLED_HASHTAGS is set)
+        if [ -n "$DISABLED_HASHTAGS" ]; then
+            post_tags=$(echo "$status" | jq -r '.tags[].name' 2>/dev/null)
+            skip_post=false
+
+            for disabled_tag in $DISABLED_HASHTAGS; do
+                if [ -n "$disabled_tag" ] && echo "$post_tags" | grep -qi "^${disabled_tag}$"; then
+                    echo "Post $status_id contains disabled hashtag #$disabled_tag, ignoring."
+                    skip_post=true
+                    break
+                fi
+            done
+
+            if [ "$skip_post" = true ]; then
+                continue
+            fi
         fi
 
         # Boost the post
